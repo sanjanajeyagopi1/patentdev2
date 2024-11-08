@@ -13,7 +13,7 @@ from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import HttpResponseError  
 from docx2pdf import convert  
 import pypandoc  
-from pypdf import PdfMerger  
+from PyPDF2 import PdfMerger  
 import tempfile
 import nltk  
 from nltk.tokenize import word_tokenize  
