@@ -12,4 +12,5 @@ jsonschema
 pypandoc==1.14  
 PyPDF2
 nltk
-azure-storage-blob  
+azure-storage-blob 
+pypdf
