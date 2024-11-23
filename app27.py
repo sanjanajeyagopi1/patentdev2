@@ -1821,6 +1821,7 @@ if st.session_state.get("filed_application_analysis") is not None:
                 else:  
                     st.warning("Please upload the pending claims document first.")  
   
+
 # Option to download results if there are no pending claims  
 if st.session_state.get("filed_application_analysis") and st.session_state.pending_claims_analysis is None:  
     docx_buffer = save_analysis_to_word(st.session_state.filed_application_analysis)  
