@@ -219,16 +219,16 @@ def summarize_text(processed_text):
         print(f"Error during text summarization: {str(e)}")  
         return processed_text  # Return original text if summarization fails  
   
-def extract_text_from_docx(uploaded_docx): 
- logging.info(f"Extracting text from DOCX: {uploaded_docx.name}") 
- try: 
-    """Extract text from a DOCX file."""  
-    doc = docx.Document(uploaded_docx)  
-    full_text = []  
-    for para in doc.paragraphs:  
-        full_text.append(para.text)  
-    return "\n".join(full_text)  
- except Exception as e:  
+def extract_text_from_docx(docx_path):  
+    logging.info(f"Extracting text from DOCX: {docx_path}")  
+    try:  
+        #Extract text from a DOCX file 
+        doc = docx.Document(docx_path)  
+        full_text = []  
+        for para in doc.paragraphs:  
+            full_text.append(para.text)  
+        return "\n".join(full_text)  
+    except Exception as e:  
         logging.error(f"Error extracting text from DOCX: {e}")  
         raise  
   
