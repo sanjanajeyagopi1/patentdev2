@@ -13,7 +13,7 @@ from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import HttpResponseError  
 from docx2pdf import convert  
 import pypandoc  
-from PyPDF2 import PdfMerger  
+from pypdf import PdfMerger  
 import tempfile
 import nltk  
 from nltk.tokenize import word_tokenize  
@@ -25,7 +25,8 @@ from pydantic import BaseModel, ValidationError
 import time  
 import random  
 from docx.enum.text import WD_ALIGN_PARAGRAPH  
-from azure.storage.blob import BlobServiceClient  
+from azure.storage.blob import BlobServiceClient 
+import tiktoken  
   
 # Define your connection string and container name  
 connection_string = "DefaultEndpointsProtocol=https;AccountName=patent;AccountKey=F8W2RDEJMD5kJ3elvulDyz6XJlYBWp4K3WY4IHhTHKfW+tG/HKTVKmzZS5y0J6GgWFp1uBKImwvs+ASthawnOA==;EndpointSuffix=core.windows.net"  
@@ -101,8 +102,22 @@ class DomainExpertise(BaseModel):
 
 # Define the Pydantic model for extracted details  
 class FoundationalClaimDetails(BaseModel):  
-    foundational_claim_details: list[dict]  
+    foundational_claim_details: list[dict]
 
+def get_tokenizer():  
+    # Replace with the correct model name if necessary  
+    model_name = "gpt-4o-mini" 
+    return tiktoken.encoding_for_model(model_name) 
+tokenizer = get_tokenizer() 
+
+def calculate_tokens(messages):  
+    # Calculate the total number of tokens for the given messages  
+    total_tokens = 0  
+    for message in messages:  
+        # Encode the message content to get the number of tokens  
+        tokenized_message = tokenizer.encode(message['content'])  
+        total_tokens += len(tokenized_message)  
+    return total_tokens  
 # Preprocessing function  
 def process_text(text):
  logging.info("Started processing text.")   
@@ -175,7 +190,34 @@ def extract_and_process_text_from_pdf(uploaded_pdf_path):
     except Exception as e:  
         logging.error(f"Failed to process the file: {e}")  
         return None  
+def summarize_text(processed_text):  
+    """Summarize the processed text using OpenAI's API."""  
+    prompt = f"""Summarize the following document text concisely:  
+    {processed_text}  
+    """  
   
+    messages = [  
+        {"role": "system", "content": "You are a summarization assistant."},  
+        {"role": "user", "content": prompt}  
+    ]  
+  
+    try:  
+        # Calculate and display tokens used for summarization  
+        tokens_used = calculate_tokens(messages)  
+        print(f"Tokens used for summarization: {tokens_used}")  
+  
+        # Call OpenAI API for summarization  
+        response = client.chat.completions.create(  
+            model="GPT-4-Omni", messages=messages, temperature=0.5  
+        )  
+  
+        # Extract the content from the response  
+        summarized_content = response.choices[0].message.content.strip()  
+        return summarized_content  
+  
+    except Exception as e:  
+        print(f"Error during text summarization: {str(e)}")  
+        return processed_text  # Return original text if summarization fails  
   
 def extract_text_from_docx(uploaded_docx): 
  logging.info(f"Extracting text from DOCX: {uploaded_docx.name}") 
@@ -210,7 +252,10 @@ def determine_domain_expertise(action_document_text):
     messages = [  
         {"role": "system", "content": "You are an AI assistant that can analyze the following action document text and determine the domain, expertise, and subject matter required to analyze this document."},  
         {"role": "user", "content": prompt}  
-    ]  
+    ] 
+    # Calculate and display tokens used  
+    tokens_used = calculate_tokens(messages)  
+    print(f"Tokens used in this API call: {tokens_used}") 
   
     try:  
         # Call OpenAI API for domain expertise determination  
@@ -262,10 +307,6 @@ def determine_domain_expertise(action_document_text):
         print(f"Error during domain expertise determination: {str(e)}")  
         return (None, None, None)  
   
-    except Exception as e:  
-        st.error(f"Error during domain expertise determination: {str(e)}")  
-        return (None, None, None) 
-    
 # Define the Pydantic model for validation  
 class ConflictResults(BaseModel):  
     foundational_claim: str  
@@ -380,7 +421,10 @@ def check_for_conflicts(action_document_text, domain, expertise, style):
     messages = [  
         {"role": "system", "content": content},  
         {"role": "user", "content": prompt},  
-    ]  
+    ] 
+    # Calculate and display tokens used  
+    tokens_used = calculate_tokens(messages)  
+    print(f"Tokens used in this API call: {tokens_used}") 
   
     try:  
         response = call_api_with_retries(messages)  
@@ -507,7 +551,10 @@ def extract_figures_and_text(conflict_results, ref_documents_texts, domain, expe
     messages = [  
         {"role": "system", "content": content},  
         {"role": "user", "content": figure_analysis_prompt},  
-    ]  
+    ] 
+    # Calculate and display tokens used  
+    tokens_used = calculate_tokens(messages)  
+    print(f"Tokens used in this API call: {tokens_used}") 
   
     analysis_output = call_llm_api(messages)  
     return parse_and_validate_json(analysis_output) 
@@ -587,6 +634,9 @@ def extract_details_from_filed_application(filed_application_text, foundational_
         {"role": "system", "content": content},  
         {"role": "user", "content": prompt},  
     ]  
+    # Calculate and display tokens used  
+    tokens_used = calculate_tokens(messages)  
+    print(f"Tokens used in this API call: {tokens_used}")
   
     try:  
         response = client.chat.completions.create(  
@@ -695,26 +745,27 @@ def extract_and_modify_filed_application(filed_application_details, pending_clai
   
         # Print raw response for debugging  
         print(f"Raw response: {content}")  
+        return json_string
   
         # Validate JSON structure  
-        if json_string:  
-            try:  
+        #if json_string:  
+            #try:  
                 # Parse the JSON to ensure it's valid  
-                parsed_json = json.loads(json_string)  
+                #parsed_json = json.loads(json_string)  
                 # Validate with Pydantic model  
-                details = FoundationalClaimDetails(**parsed_json)  
-                return details.dict()  
-            except json.JSONDecodeError as e:  
-                print(f"JSON decoding error: {e}")  
-                print(f"Raw response: {json_string}")  
-                return None  
-            except ValidationError as e:  
-                print(f"Validation error: {e.json()}")  
-                print(f"Raw response: {json_string}")  
-                return None  
-        else:  
-            print("No JSON content extracted.")  
-            return None  
+                #details = FoundationalClaimDetails(**parsed_json)  
+                #return details.dict()  
+            #except json.JSONDecodeError as e:  
+                #print(f"JSON decoding error: {e}")  
+                #print(f"Raw response: {json_string}")  
+                #return None  
+            #except ValidationError as e:  
+                #print(f"Validation error: {e.json()}")  
+                #print(f"Raw response: {json_string}")  
+                #return None  
+        #else:  
+            #print("No JSON content extracted.")  
+            #return None  
     except Exception as e:  
         print(f"Error extracting details from filed application: {e}")  
         return None 
@@ -747,7 +798,7 @@ def generate_content(domain, expertise, style):
     """  
   
 def generate_few_shot_examples():  
-    """Generate few-shot examples for analysis."""  
+    """Generate few-shot example for analysis."""  
     few_shot_example = """  
     **Example Amendment and Argument:**  
     **Amendment 1: Enhanced Communication Protocol**  
@@ -756,13 +807,13 @@ def generate_few_shot_examples():
     **Proposed Amended Language:**  
     "A communication system comprising a transmitter and receiver, wherein the transmitter is configured to utilize an adaptive frequency hopping protocol to dynamically adjust communication channels based on interference levels."  
     **Derivation and Reasoning:**  
-    - **Source Reference**: Derived from Paragraphs [0040]-[0045] and Figures 4A-4D of the application.  
-    - **Reasoning**: The amendment specifies the use of an "adaptive frequency hopping protocol" and includes dynamic adjustments based on interference levels, adding specificity and distinguishing over prior art that lacks adaptive frequency hopping.  
+    - **Source Reference:** Derived from Paragraphs [0040]-[0045] and Figures 4A-4D of the application.  
+    - **Reasoning:** The amendment specifies the use of an "adaptive frequency hopping protocol" and includes dynamic adjustments based on interference levels, adding specificity and distinguishing over prior art that lacks adaptive frequency hopping.  
     **Supporting Arguments:**  
-    - **Novelty**: The cited reference does not disclose a communication system utilizing an adaptive frequency hopping protocol that adjusts based on interference levels.  
-    - **Non-Obviousness**: Combining a communication system with an adaptive frequency hopping protocol introduces an unexpected technical advantage by improving communication reliability and reducing interference, which is not suggested or rendered obvious by the prior art.  
-    - **Technical Advantages**: Enhances communication reliability and reduces interference, as detailed in Paragraph [0046] of the application.  
-    - **Addressing Examiner's Rejection**: The prior art only teaches static frequency selection methods, thus the amendment overcomes the rejection by introducing adaptive frequency hopping functionality not suggested in the cited reference.  
+    - **Novelty:** The cited reference does not disclose a communication system utilizing an adaptive frequency hopping protocol that adjusts based on interference levels.  
+    - **Non-Obviousness:** Combining a communication system with an adaptive frequency hopping protocol introduces an unexpected technical advantage by improving communication reliability and reducing interference, which is not suggested or rendered obvious by the prior art.  
+    - **Technical Advantages:** Enhances communication reliability and reduces interference, as detailed in Paragraph [0046] of the application.  
+    - **Addressing Examiner's Rejection:** The prior art only teaches static frequency selection methods, thus the amendment overcomes the rejection by introducing adaptive frequency hopping functionality not suggested in the cited reference.  
     """  
   
     text_a = """  
@@ -796,20 +847,30 @@ def generate_formatting_rules():
     """Generate formatting rules for the analysis."""  
     return """  
     IMPORTANT FORMATTING RULES:  
-    Numbering and Formatting: Use bullet points (•) instead of numbers when listing items.  
-    Do not include markdown formatting in your response, except for bolding headings and sub-headings, and underlining as specified.  
-    Bold all headings and sub-headings and the point headings for clarity.  
-    Underline new language in the 'Proposed Amended Language' by enclosing it within '<u>' and '</u>' tags.  
-    Provide detailed explanations and cite the sources correctly.  
-    Propose amendments for all key features in foundational claim.  
-    Do NOT include "N/A" anywhere and enclose words within asterisks(**)  
-    Avoid one-line explanations; provide thorough and detailed analysis  
-    Maintain concise formatting without extra line spacing  
-    Add a conclusion after proposing amendments.  
-    The provided examples are for structural guidance only; do not replicate them verbatim.  
-    Avoid using words like "only" that may downplay the content  
-    In the few shot examples, the text enclosed within **...** should be bold.  
-    """  
+
+- **Bold Formatting:**  
+  - **Bold all headings and subheadings**, including any labels such as "Original Claim Language," "Proposed Amended Language," "Derivation and Reasoning," "- Source Reference," and "- Reasoning."  
+
+- **Underlining New Language:**  
+  - Underline new language in the 'Proposed Amended Language' by enclosing it within '<u>' and '</u>' tags.  
+
+- **Bullet Points:**  
+  - Use bullet points (•) for lists of items.  
+  - Do not use bullet points for subheadings or labels.  
+
+- **No Markdown Syntax:**  
+  - Do not include markdown formatting besides bold and underlining as specified.  
+
+- **Detailed Explanations:**  
+  - Provide thorough and detailed explanations.  
+  - Avoid one-line explanations; expand on key points.  
+
+- **Consistency:**  
+  - Maintain consistent formatting throughout the document.  
+  - Do not include placeholder text like "N/A" or enclose words within asterisks unless indicating bold text.  
+
+
+"""  
   
 def generate_analysis_prompt(extracted_details, foundational_claim, figure_analysis):  
     """Generate the user prompt for analyzing the filed application."""  
@@ -846,7 +907,10 @@ def generate_analysis_prompt(extracted_details, foundational_claim, figure_analy
     Identify areas where the foundational claim can be distinguished from the cited reference. Focus on unique structural features, specific materials, configurations, or functions not disclosed in the cited reference.  
   
     Proposed Amendments and Arguments:  
-    For each key feature point in the foundational claim, propose specific amendments separately. NOTE: for all the points in the foundational claim, it is mandatory to propose amendments.  
+    For each key feature point in the foundational claim, propose specific amendments separately. 
+    NOTE: 
+    -for all the points in the foundational claim, it is mandatory to propose amendments.
+    -the amendments should be proposed for the application as filed.  
     Present original and proposed versions, highlighting new features, specific materials, or configurations. **Underline** the new language proposed by enclosing it within '<u>' and '</u>' tags.  
       
     Format for Each Amendment:  
@@ -856,7 +920,8 @@ def generate_analysis_prompt(extracted_details, foundational_claim, figure_analy
     Proposed Amended Language:  
     "[Insert the enhanced feature description, incorporating new details, specific materials, or configurations. **Underline** the new language proposed by enclosing it within '<u>' and '</u>' tags.]"  
     Derivation of Amendment:  
-    Source Reference: Cite specific sections, paragraphs, figures, or embodiments from the application that support the amendment. Example: "Derived from Paragraph [0123] and Figure 5 of the application."  
+    Source Reference: Cite specific sections, paragraphs, figures, or embodiments from the application as filed text that support the amendment. Example: "Derived from Paragraph [0123] and Figure 5 of the application.
+    Ignore citing specific sections that are in the ABSTRACT or in the SUMMARY section.
     Reasoning: Explain why the amendment was made, detailing how it enhances specificity, overcomes prior art, or adds technical advantages. Highlight any differences from the cited references. Emphasize any technical advantages or improvements introduced by the amendments.  
     """  
   
@@ -878,7 +943,10 @@ def format_analysis_output(response_content):
 def analyze_filed_application(extracted_details, foundational_claim, figure_analysis, domain, expertise, style):  
     """Analyze the filed application based on the foundational claim, figure analysis, and application details."""  
     content = generate_content(domain, expertise, style)  
-    prompt = generate_analysis_prompt(extracted_details, foundational_claim, figure_analysis)  
+    prompt = generate_analysis_prompt(extracted_details, foundational_claim, figure_analysis)
+    print("--------------------") 
+    print(prompt) 
+    print("------------------")
     few_shot_example, text_a = generate_few_shot_examples()  
   
     messages = [  
@@ -886,7 +954,10 @@ def analyze_filed_application(extracted_details, foundational_claim, figure_anal
         {"role": "user", "content": prompt},  
         {"role": "user", "content": few_shot_example},  
         {"role": "user", "content": text_a},  
-    ]  
+    ] 
+    # Calculate and display tokens used  
+    tokens_used = calculate_tokens(messages)  
+    print(f"Tokens used in this API call: {tokens_used}") 
   
     base_delay = 1  
     max_delay = 32  
@@ -1081,25 +1152,29 @@ def save_analysis_to_word(analysis_output):
         else:
             paragraph = doc.add_paragraph()
             
-            # Regex to match bold text with optional trailing colon
+            # This new regex pattern will match bold text (with and without colon) and other text
+            # It captures three cases: bold without colon, bold with colon, and plain text
             parts = re.split(r'(\*\*[^*]+\*\*:?|<u>.*?</u>)', line)
+            
             for part in parts:
-                if part.startswith("**") and part.endswith("**:"):
-                    # Handle bold text with trailing colon
-                    bold_text = part[2:-3]  # Remove ** and colon
+                if part.startswith("**") and part.endswith("**"):
+                    # Bold text with colon at the end
+                    bold_text = part[2:-2]  # Remove '**' at start and ':*' at the end
                     run = paragraph.add_run(bold_text)
                     run.bold = True
                     paragraph.add_run(":")  # Add colon separately
                 elif part.startswith("**") and part.endswith("**"):
-                    # Handle bold text without trailing colon
-                    run = paragraph.add_run(part[2:-2])  # Remove **
+                    # Bold text without colon
+                    bold_text = part[2:-2]  # Remove '**'
+                    run = paragraph.add_run(bold_text)
                     run.bold = True
                 elif part.startswith("<u>") and part.endswith("</u>"):
-                    # Handle underlined text
-                    run = paragraph.add_run(part[3:-4])  # Remove <u> and </u>
+                    # Underlined text
+                    underlined_text = part[3:-4]  # Remove '<u>' and '</u>'
+                    run = paragraph.add_run(underlined_text)
                     run.underline = True
                 else:
-                    # Handle regular text
+                    # Plain text
                     paragraph.add_run(part)
 
     # Save the document to a BytesIO buffer instead of writing to disk
@@ -1420,7 +1495,11 @@ with st.expander("Step 1: Office Action", expanded=True):
                         # Process the extracted text  
                         processed_examiner_text = "\n".join(extracted_examiner_text)  # Join pages for further processing  
   
-                        domain, expertise, style = determine_domain_expertise(processed_examiner_text)  
+                        # Summarize the processed text  
+                        summarized_text = summarize_text(processed_examiner_text)  
+  
+                        # Determine domain expertise using the summarized text  
+                        domain, expertise, style = determine_domain_expertise(summarized_text)  
                         if not (domain and expertise and style):  
                             st.error("Failed to determine domain expertise.")  
                         else:  
@@ -1430,16 +1509,16 @@ with st.expander("Step 1: Office Action", expanded=True):
   
                             conflict_results_raw = check_for_conflicts(processed_examiner_text, domain, expertise, style)  
                             if not conflict_results_raw:  
-                                     st.error("Failed to check for conflicts.")  
+                                st.error("Failed to check for conflicts.")  
                             else:  
-                               st.session_state.conflict_results = conflict_results_raw  
-                               st.session_state.foundational_claim = conflict_results_raw.get("foundational_claim")  
-                               st.session_state.cited_documents = conflict_results_raw.get("documents_referenced")  
-                               st.success("Conflicts checked successfully!")  
+                                st.session_state.conflict_results = conflict_results_raw  
+                                st.session_state.foundational_claim = conflict_results_raw.get("foundational_claim")  
+                                st.session_state.cited_documents = conflict_results_raw.get("documents_referenced")  
+                                st.success("Conflicts checked successfully!")  
   
-                    os.remove(temp_file_path) 
-                    if uploaded_examiner_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" and os.path.exists(temp_pdf_path):  
-                        os.remove(temp_pdf_path)  
+                    os.remove(temp_file_path)  
+                if uploaded_examiner_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" and os.path.exists(temp_pdf_path):  
+                    os.remove(temp_pdf_path) 
 # Check if cited documents exist  
 if st.session_state.get("cited_documents") is not None:  
     st.write("### Cited Documents Referenced:")  
